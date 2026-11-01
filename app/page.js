@@ -2,6 +2,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SEED_LEADS, STAGES, COUNTRIES, NICHES, CHANNELS } from "../lib/seed";
 import { CITIES, SOURCES } from "../lib/cities";
+import { supabase } from "../lib/supabase";
+
+// cloud.save(key,value) — Supabase app_settings me save; login ke baad set hota hai
+const cloud = { save: null };
 
 const KEY = "jm-lead-dashboard-v1";
 const today = () => new Date().toISOString().slice(0,10);
@@ -20,7 +24,7 @@ const PRE_REPLY=[...PRE_SENT,"Sent","Silent / Close File"];
 const REPLY_TYPES=["Interested","Demo Requested","Price Asked","Question","Interested — later","Declined","Other"];
 const TPL_KEY="jm-lead-templates-v1";
 const loadTpl=()=>{ try{ return JSON.parse(localStorage.getItem(TPL_KEY))||{}; }catch(e){ return {}; } };
-const saveTpl=(t)=>{ try{ localStorage.setItem(TPL_KEY,JSON.stringify(t)); }catch(e){} };
+const saveTpl=(t)=>{ try{ localStorage.setItem(TPL_KEY,JSON.stringify(t)); }catch(e){} cloud.save?.("templates",t); };
 const fill=(t,l)=>t.replaceAll("{name}",(l.person||"").split(" ")[0]||"there").replaceAll("{business}",l.business||"");
 const download=(content,type,name)=>{ const url=URL.createObjectURL(new Blob([content],{type})); const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000); };
 const OPT_KEY="jm-lead-options-v1";
@@ -41,12 +45,69 @@ export default function Page(){
   const [loaded,setLoaded]=useState(false);
   const [sendFor,setSendFor]=useState(null); const [replyFor,setReplyFor]=useState(null);
   const [fn,setFn]=useState("All"); const [sort,setSort]=useState("recent");
+  const [session,setSession]=useState(supabase?undefined:null); const [sync,setSync]=useState(supabase?"loading":"local");
+  const synced=useRef(null); const syncedOrder=useRef(""); const timer=useRef(null);
   const [opts,setOpts]=useState({countries:[],niches:[],sources:[]}); const [recent,setRecent]=useState({cities:{},sources:[]}); const [settings,setSettings]=useState(null);
 
-  useEffect(()=>{ try{ const raw=localStorage.getItem(KEY); if(raw) setLeads(JSON.parse(raw)); }catch(e){} setOpts(loadOpts()); setRecent(loadRecent()); setLoaded(true); },[]);
-  useEffect(()=>{ if(loaded) try{ localStorage.setItem(RECENT_KEY, JSON.stringify(recent)); }catch(e){} },[recent,loaded]);
+  useEffect(()=>{ try{ const raw=localStorage.getItem(KEY); if(raw) setLeads(JSON.parse(raw)); }catch(e){} setOpts(loadOpts()); setRecent(loadRecent()); if(!supabase) setLoaded(true); },[]);
+
+  // --- Supabase: login session ---
+  useEffect(()=>{ if(!supabase) return;
+    supabase.auth.getSession().then(({data})=>setSession(data.session));
+    const {data:sub}=supabase.auth.onAuthStateChange((_e,s)=>setSession(s));
+    return ()=>sub.subscription.unsubscribe(); },[]);
+
+  // --- Supabase: login ke baad data load (pehli dafa local data upload) ---
+  const uid=session?.user?.id;
+  useEffect(()=>{ if(!supabase) return;
+    if(!uid){ cloud.save=null; synced.current=null; setLoaded(false); return; }
+    let off=false;
+    cloud.save=(k,v)=>supabase.from("app_settings").upsert({user_id:uid,key:k,value:v,updated_at:new Date().toISOString()},{onConflict:"user_id,key"}).then(({error})=>{ if(error) setSync("error"); });
+    (async()=>{
+      setSync("loading");
+      const [a,b]=await Promise.all([supabase.from("leads").select("id,data"), supabase.from("app_settings").select("key,value")]);
+      if(off) return;
+      if(a.error||b.error){ setSync("error"); alert("Supabase se data load nahi hua: "+(a.error||b.error).message+"\n\nKya schema.sql run kiya hai?"); return; }
+      const st=Object.fromEntries((b.data||[]).map(r=>[r.key,r.value]));
+      let list=(a.data||[]).map(r=>r.data);
+      if(list.length===0){
+        let local=SEED_LEADS; try{ const raw=localStorage.getItem(KEY); if(raw) local=JSON.parse(raw); }catch(e){}
+        const up=await supabase.from("leads").upsert(local.map(l=>({user_id:uid,id:l.id,data:l})),{onConflict:"user_id,id"});
+        if(up.error){ setSync("error"); alert("Upload nahi hua: "+up.error.message); return; }
+        list=local;
+        await Promise.all([cloud.save("options",loadOpts()),cloud.save("templates",loadTpl()),cloud.save("recent",loadRecent()),cloud.save("order",local.map(l=>l.id))]);
+      } else {
+        if(Array.isArray(st.order)){ const pos=new Map(st.order.map((id,i)=>[id,i])); list.sort((x,y)=>(pos.has(x.id)?pos.get(x.id):-1)-(pos.has(y.id)?pos.get(y.id):-1)); }
+        if(st.options) setOpts({countries:st.options.countries||[],niches:st.options.niches||[],sources:st.options.sources||[]});
+        if(st.recent) setRecent({cities:st.recent.cities||{},sources:st.recent.sources||[]});
+        if(st.templates) try{ localStorage.setItem(TPL_KEY,JSON.stringify(st.templates)); }catch(e){}
+      }
+      if(off) return;
+      synced.current=new Map(list.map(l=>[l.id,JSON.stringify(l)])); syncedOrder.current=list.map(l=>l.id).join("|");
+      setLeads(list); setLoaded(true); setSync("saved");
+    })();
+    return ()=>{ off=true; };
+  },[uid]);
+
+  // --- Supabase: har change ke 0.6s baad sirf badli hui leads save ---
+  useEffect(()=>{ if(!supabase||!uid||!loaded||!synced.current) return;
+    clearTimeout(timer.current); setSync("saving");
+    timer.current=setTimeout(async()=>{
+      const prev=synced.current; const now=new Map(leads.map(l=>[l.id,JSON.stringify(l)]));
+      const ups=leads.filter(l=>prev.get(l.id)!==now.get(l.id)).map(l=>({user_id:uid,id:l.id,data:l,updated_at:new Date().toISOString()}));
+      const dels=[...prev.keys()].filter(id=>!now.has(id));
+      const order=leads.map(l=>l.id).join("|");
+      try{
+        if(ups.length){ const {error}=await supabase.from("leads").upsert(ups,{onConflict:"user_id,id"}); if(error) throw error; }
+        if(dels.length){ const {error}=await supabase.from("leads").delete().in("id",dels); if(error) throw error; }
+        if(order!==syncedOrder.current){ const {error}=await supabase.from("app_settings").upsert({user_id:uid,key:"order",value:leads.map(l=>l.id),updated_at:new Date().toISOString()},{onConflict:"user_id,key"}); if(error) throw error; syncedOrder.current=order; }
+        synced.current=now; setSync("saved");
+      }catch(e){ console.error(e); setSync("error"); }
+    },600);
+  },[leads,loaded,uid]);
+  useEffect(()=>{ if(loaded){ try{ localStorage.setItem(RECENT_KEY, JSON.stringify(recent)); }catch(e){} cloud.save?.("recent",recent); } },[recent,loaded]);
   useEffect(()=>{ if(loaded) localStorage.setItem(KEY, JSON.stringify(leads)); },[leads,loaded]);
-  useEffect(()=>{ if(loaded) try{ localStorage.setItem(OPT_KEY, JSON.stringify(opts)); }catch(e){} },[opts,loaded]);
+  useEffect(()=>{ if(loaded){ try{ localStorage.setItem(OPT_KEY, JSON.stringify(opts)); }catch(e){} cloud.save?.("options",opts); } },[opts,loaded]);
 
   const allCountries = useMemo(()=>uniq([...COUNTRIES,...opts.countries,...leads.map(l=>l.country)]),[opts,leads]);
   const allNiches = useMemo(()=>uniq([...NICHES,...opts.niches,...leads.map(l=>l.niche)]),[opts,leads]);
@@ -138,6 +199,11 @@ export default function Page(){
   const title = { all:"All leads", kanban:"Pipeline", due:"Follow-up due", hot:"Hot leads", reports:"Reports" }[view];
   const capFull = sentToday>=10;
 
+  if(supabase && session===undefined) return <div className="center muted">Loading…</div>;
+  if(supabase && !session) return <Login />;
+  if(supabase && !loaded) return <div className="center muted">{sync==="error"?"Data load nahi hua — page refresh karein.":"Aapka data load ho raha hai…"}</div>;
+  const syncLabel={local:"Sirf is browser me save",loading:"Loading…",saving:"Saving…",saved:"Cloud me saved ✓",error:"Save nahi hua — retry"}[sync];
+
   return (
   <div className="wrap">
     <aside className="sidebar">
@@ -147,10 +213,14 @@ export default function Page(){
         <button key={v.id} className={`navbtn ${view===v.id?"active":""}`} onClick={()=>setView(v.id)}>
           <span>{v.label}</span>{v.count!==null&&<span className="count">{v.count}</span>}
         </button>))}
-      <div className="capbox">
+      <div className="capbox" style={{marginBottom:8}}>
         <div className="row"><span>WhatsApp cap aaj</span><b>{sentToday} / 10</b></div>
         <div className={`bar ${capFull?"full":""}`}><i style={{width:Math.min(100,sentToday*10)+"%"}}/></div>
         {capFull&&<div className="muted" style={{marginTop:8}}>Cap full — baqi leads Hold me daalo.</div>}
+      </div>
+      <div className="account">
+        <button className={`sync ${sync}`} title={sync==="error"?"Dobara try karo":""} onClick={()=>sync==="error"&&setLeads(l=>[...l])}><i className="dot"/>{syncLabel}</button>
+        {session&&<div className="who"><span title={session.user.email}>{session.user.email}</span><button onClick={()=>supabase.auth.signOut()}>Logout</button></div>}
       </div>
     </aside>
 
@@ -166,6 +236,7 @@ export default function Page(){
 
       <div className="mobile-nav">
         {views.map(v=>(<button key={v.id} className={`navbtn ${view===v.id?"active":""}`} onClick={()=>setView(v.id)}>{v.label}{v.count!==null&&<span className="count">{v.count}</span>}</button>))}
+        {session&&<button className="navbtn" onClick={()=>supabase.auth.signOut()}>Logout</button>}
       </div>
 
       <section className="stats">
@@ -437,4 +508,24 @@ function Combo({value,onChange,groups,placeholder}){
     {open&&flat.length>0&&<div className="combo-list">{shown.map(g=>(<div key={g.label}><div className="combo-group">{g.label}</div>
       {g.items.map(x=>{ idx++; if(idx>=60) return null; const i=idx; return <div key={g.label+x} className={`combo-item ${i===hi?"hi":""} ${x===value?"sel":""}`} onMouseEnter={()=>setHi(i)} onMouseDown={e=>{e.preventDefault();pick(x);}}>{x}</div>; })}</div>))}</div>}
   </div>);
+}
+
+function Login(){
+  const [mode,setMode]=useState("in"); const [email,setEmail]=useState(""); const [pw,setPw]=useState("");
+  const [busy,setBusy]=useState(false); const [msg,setMsg]=useState("");
+  const go=async(e)=>{ e.preventDefault(); setBusy(true); setMsg("");
+    const fn= mode==="in" ? supabase.auth.signInWithPassword({email,password:pw}) : supabase.auth.signUp({email,password:pw});
+    const {data,error}=await fn; setBusy(false);
+    if(error) return setMsg(error.message);
+    if(mode==="up" && !data.session) setMsg("Account ban gaya. Email me confirm link par click karein, phir yahan login karein.");
+  };
+  return (<div className="login"><form className="login-card" onSubmit={go}>
+    <div className="brand" style={{padding:0,marginBottom:18}}><div className="brand-mark">JM</div><div><b>Lead Dashboard</b><small>JM Digital Marketing</small></div></div>
+    <h2>{mode==="in"?"Login":"Account banao"}</h2>
+    <div className="field"><label>Email</label><input type="email" required autoFocus value={email} onChange={e=>setEmail(e.target.value)} /></div>
+    <div className="field"><label>Password</label><input type="password" required minLength={6} value={pw} onChange={e=>setPw(e.target.value)} /></div>
+    {msg&&<div className="warnbox">{msg}</div>}
+    <button className="btn" disabled={busy} style={{width:"100%",justifyContent:"center"}}>{busy?"…":mode==="in"?"Login":"Account banao"}</button>
+    <button type="button" className="linkbtn" onClick={()=>{setMode(mode==="in"?"up":"in");setMsg("");}}>{mode==="in"?"Pehli dafa? Account banao":"Account hai? Login karo"}</button>
+  </form></div>);
 }
