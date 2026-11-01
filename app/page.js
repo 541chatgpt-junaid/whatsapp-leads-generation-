@@ -48,77 +48,136 @@ export default function Page(){
   };
   const resetSeed = ()=>{ if(confirm("Seed data wapas load kar dein? Aapki changes khatam ho jayengi.")){ setLeads(SEED_LEADS); localStorage.removeItem(KEY);} };
 
+  const heatLabel = { hot:"Hot", warm:"Warm", done:"Closed", cold:"Cold" };
+  const views = [
+    { id:"all", label:"All leads", count:leads.length },
+    { id:"kanban", label:"Pipeline", count:null },
+    { id:"due", label:"Follow-up due", count:due.length },
+    { id:"hot", label:"Hot leads", count:hot.length },
+  ];
+  const title = { all:"All leads", kanban:"Pipeline", due:"Follow-up due", hot:"Hot leads" }[view];
+  const capFull = sentToday>=10;
+
   return (
   <div className="wrap">
     <aside className="sidebar">
-      <div><div className="logo">JM Lead Dashboard</div><div className="tagline">JM Digital Marketing<br/>Smart Solutions. Real Results.</div></div>
-      <button className={`navbtn ${view==="all"?"active":""}`} onClick={()=>setView("all")}>📊 All Leads ({leads.length})</button>
-      <button className={`navbtn ${view==="kanban"?"active":""}`} onClick={()=>setView("kanban")}>🗂️ Pipeline / Kanban</button>
-      <button className={`navbtn ${view==="due"?"active":""}`} onClick={()=>setView("due")}>⏰ Follow-up Due ({due.length})</button>
-      <button className={`navbtn ${view==="hot"?"active":""}`} onClick={()=>setView("hot")}>🔥 Hot Leads ({hot.length})</button>
-      <button className="btn" style={{marginTop:14}} onClick={()=>setEditing(emptyLead())}>+ New Lead Add Karo</button>
-      <button className="btn2" onClick={exportCsv}>⬇ Export CSV</button>
-      <button className="btn2" onClick={resetSeed}>↺ Seed Data Reset</button>
-      <div className="capbox"><b>Today's WhatsApp Cap</b><div className="bar"><i style={{width:Math.min(100,sentToday*10)+"%"}}/></div><span style={{color:"var(--muted)",fontSize:13}}>{sentToday} / 10 nayi chats aaj</span><div style={{fontSize:12,color:"var(--muted)",marginTop:8}}>Cap full ho to baqi leads kal ke liye Hold me daalo.</div></div>
+      <div className="brand"><div className="brand-mark">JM</div><div><b>Lead Dashboard</b><small>JM Digital Marketing</small></div></div>
+      <div className="navlabel">Views</div>
+      {views.map(v=>(
+        <button key={v.id} className={`navbtn ${view===v.id?"active":""}`} onClick={()=>setView(v.id)}>
+          <span>{v.label}</span>{v.count!==null&&<span className="count">{v.count}</span>}
+        </button>))}
+      <div className="capbox">
+        <div className="row"><span>WhatsApp cap aaj</span><b>{sentToday} / 10</b></div>
+        <div className={`bar ${capFull?"full":""}`}><i style={{width:Math.min(100,sentToday*10)+"%"}}/></div>
+        {capFull&&<div className="muted" style={{marginTop:8}}>Cap full — baqi leads Hold me daalo.</div>}
+      </div>
     </aside>
 
     <main className="main">
-      <div className="h1">Kis ko kab msg kiya, kis ka reply aya — sab ek jagah ✦</div>
-      <p className="sub">Card par click karo to us lead ki puri history, demo, price aur next action nazar ayega. Sab data isi browser me auto-save hota hai.</p>
+      <div className="topbar">
+        <div><div className="h1">{title}</div><p className="sub">Kis ko kab msg kiya, kis ka reply aya — sab ek jagah.</p></div>
+        <div className="actions">
+          <button className="btn2" onClick={exportCsv}>Export CSV</button>
+          <button className="btn2" onClick={resetSeed}>Reset</button>
+          <button className="btn" onClick={()=>setEditing(emptyLead())}>+ New lead</button>
+        </div>
+      </div>
+
+      <div className="mobile-nav">
+        {views.map(v=>(<button key={v.id} className={`navbtn ${view===v.id?"active":""}`} onClick={()=>setView(v.id)}>{v.label}{v.count!==null&&<span className="count">{v.count}</span>}</button>))}
+      </div>
 
       <section className="stats">
-        <div className="stat"><b>{leads.length}</b><span>Total Leads</span></div>
-        <div className="stat"><b>{sent}</b><span>Msg Bheje Gaye</span></div>
-        <div className="stat"><b>{replies} {sent?`(${Math.round(replies/Math.max(sent,1)*100)}%)`:""}</b><span>Replies Aye</span></div>
-        <div className="stat"><b>{due.length} due · {hot.length} hot</b><span>Aaj Follow-up / Garam Leads</span></div>
+        <div className="stat"><span>Total leads</span><b>{leads.length}</b><small>{COUNTRIES.filter(c=>leads.some(l=>l.country===c)).length} countries</small></div>
+        <div className="stat"><span>Messages sent</span><b>{sent}</b><small>{sentToday} aaj</small></div>
+        <div className="stat"><span>Replies</span><b>{replies}</b><small>{sent?Math.round(replies/Math.max(sent,1)*100):0}% reply rate</small></div>
+        <div className="stat"><span>Follow-up due</span><b>{due.length}</b><small>{hot.length} hot leads</small></div>
       </section>
 
-      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-        {COUNTRIES.map(c=>{ const n=leads.filter(l=>l.country===c).length; return n? <span key={c} className="pill stage">{c}: {n} leads · {leads.filter(l=>l.country===c&&l.reply==="Yes").length} replies</span>:null; })}
-      </div>
-
-      <div className="toolbar">
-        <input className="search" placeholder="🔍 Naam, number, city ya niche search karo..." value={q} onChange={e=>setQ(e.target.value)} />
-        <select className="sel" value={fc} onChange={e=>setFc(e.target.value)}><option>All</option>{COUNTRIES.map(c=><option key={c}>{c}</option>)}</select>
-        <select className="sel" value={fs} onChange={e=>setFs(e.target.value)}><option>All</option>{STAGES.map(s=><option key={s}>{s}</option>)}</select>
-      </div>
-
-      {view==="kanban" ? (
-        <div className="kanban">{STAGES.filter(s=>leads.some(l=>l.stage===s)).map(stage=>(
-          <div className="kcol" key={stage}><h4>{stage} · {leads.filter(l=>l.stage===stage).length}</h4>
-            {leads.filter(l=>l.stage===stage).map(l=>(<div className="kcard" key={l.id} onClick={()=>setDetail(l)}><b>{l.business}</b><div className="meta">{l.city} · {l.country}<br/>{l.price||"—"}</div></div>))}
-          </div>))}
+      <div className="panel">
+        <div className="toolbar">
+          <input className="search" placeholder="Search naam, number, city, niche…" value={q} onChange={e=>setQ(e.target.value)} />
+          <select className="sel" value={fc} onChange={e=>setFc(e.target.value)}>
+            <option value="All">All countries</option>
+            {COUNTRIES.map(c=>{ const n=leads.filter(l=>l.country===c).length; return <option key={c} value={c}>{c}{n?` (${n})`:""}</option>; })}
+          </select>
+          {view!=="kanban"&&<select className="sel" value={fs} onChange={e=>setFs(e.target.value)}><option value="All">All stages</option>{STAGES.map(s=><option key={s}>{s}</option>)}</select>}
         </div>
-      ) : filtered.length===0 ? <div className="empty">Is filter me koi lead nahi mila. New Lead add karo ya filter badlo.</div> : (
-        <div className="grid">{filtered.map(l=>(
-          <article className="card" key={l.id} onClick={()=>setDetail(l)} style={{cursor:"pointer"}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:8}}><h3>{l.business}</h3><span className={`pill ${heat(l)}`}>{heat(l)==="hot"?"🔥 HOT":heat(l)==="warm"?"WARM":heat(l)==="done"?"DONE":"LEAD"}</span></div>
-            <div className="meta">👤 {l.person||"—"} · 📱 {l.phone||"—"}<br/>📍 {l.city} · {l.country} · {l.niche}<br/>🌐 {l.website} · Maps: {l.gmb}</div>
-            <p className="meta" style={{color:"#ddd6fe"}}>{l.gap}</p>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}><span className="pill stage">{l.stage}</span>{l.dateSent&&<span className="pill cold">Sent: {l.dateSent}</span>}{l.reply==="Yes"&&<span className="pill done">Reply: {l.replyDate||"Yes"}</span>}{isDue(l)&&<span className="pill due">⏰ Follow-up Due</span>}</div>
-            {l.replyText&&<p className="meta" style={{marginTop:10}}>💬 “{l.replyText}”</p>}
-            <div className="meta" style={{marginTop:8}}><b style={{color:"#fff"}}>Next:</b> {l.nextAction||"—"}<br/>💰 {l.price||"Price set nahi"} · Demo: {l.demoStatus}</div>
-          </article>))}
-        </div>
-      )}
+
+        {view==="kanban" ? (
+          <div className="kanban">{STAGES.filter(s=>filtered.some(l=>l.stage===s)).map(stage=>{ const col=filtered.filter(l=>l.stage===stage); return (
+            <div className="kcol" key={stage}><h4>{stage}<span>{col.length}</span></h4>
+              {col.map(l=>(<div className="kcard" key={l.id} onClick={()=>setDetail(l)}><b>{l.business}</b><div className="muted">{l.city} · {l.country}</div>{l.price&&<div className="muted num" style={{marginTop:4}}>{l.price}</div>}</div>))}
+            </div>); })}
+          </div>
+        ) : filtered.length===0 ? <div className="empty">Is filter me koi lead nahi mila.</div> : (
+          <div style={{overflowX:"auto"}}>
+          <table className="table">
+            <thead><tr><th>Lead</th><th>Stage</th><th className="hide-sm">Status</th><th className="hide-md">Sent</th><th className="hide-md">Reply</th><th className="hide-sm">Next follow-up</th><th className="hide-md">Price</th></tr></thead>
+            <tbody>{filtered.map(l=>{ const h=heat(l); return (
+              <tr key={l.id} onClick={()=>setDetail(l)}>
+                <td className="name"><b>{l.business}</b><small>{[l.person,l.city,l.country].filter(Boolean).join(" · ")}</small></td>
+                <td><span className="pill stage">{l.stage}</span></td>
+                <td className="hide-sm"><span className={`pill ${h}`}><i className="dot"/>{heatLabel[h]}</span></td>
+                <td className="hide-md num muted">{l.dateSent||"—"}</td>
+                <td className="hide-md">{l.reply==="Yes"?<span className="pill done">Replied</span>:<span className="muted">—</span>}</td>
+                <td className={`hide-sm num ${isDue(l)?"overdue":"muted"}`}>{l.nextFollowUp||"—"}</td>
+                <td className="hide-md num">{l.price||<span className="muted">—</span>}</td>
+              </tr>); })}
+            </tbody>
+          </table>
+          </div>
+        )}
+      </div>
     </main>
 
     {detail && (
-      <div className="modalbg" onClick={()=>setDetail(null)}><div className="modal" onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",gap:10}}><div><h2 style={{fontSize:24}}>{detail.business}</h2><p className="meta">{detail.person} · {detail.phone} · {detail.city}, {detail.country} · {detail.niche} · Source: {detail.source}</p></div><span className={`pill ${heat(detail)}`}>{detail.stage}</span></div>
-        <div className="form">
-          <div className="field"><label>Gap / Observation</label><p>{detail.gap||"—"}</p></div>
-          <div className="field"><label>Website / GMB</label><p>{detail.website} / {detail.gmb}</p></div>
-          <div className="field"><label>Msg Kab / Channel / Variant</label><p>{detail.dateSent||"—"} · {detail.channel} · Variant {detail.variant||"—"}<br/>{detail.messageSent}</p></div>
-          <div className="field"><label>Reply</label><p>{detail.reply==="Yes"?`${detail.replyDate||""} — ${detail.replyType}`:"Koi reply nahi"}<br/>“{detail.replyText||""}”</p></div>
-          <div className="field"><label>Demo</label><p>Status: {detail.demoStatus} · Personalized: {detail.demoPersonalized}<br/>{detail.demoLink? <a href={detail.demoLink} target="_blank">{detail.demoLink}</a>:"Link nahi"}</p></div>
-          <div className="field"><label>Price / Deal</label><p>{detail.price||"—"}<br/>Price demo ke sath clear: {detail.priceClearWithDemo}<br/>Closing Q: {detail.closingQuestion||"—"}</p></div>
-          <div className="field full"><label>Next Action · Follow-up: {detail.nextFollowUp||"—"} · Count: {detail.followUps}</label><p>{detail.nextAction||"—"}</p></div>
-          <div className="field full"><label>Notes</label><p>{detail.notes||"—"}</p></div>
+      <div className="overlay" onClick={()=>setDetail(null)}><div className="drawer" onClick={e=>e.stopPropagation()}>
+        <div className="drawer-head">
+          <div><h2>{detail.business}</h2>
+            <div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}><span className="pill stage">{detail.stage}</span><span className={`pill ${heat(detail)}`}><i className="dot"/>{heatLabel[heat(detail)]}</span>{isDue(detail)&&<span className="pill hot">Follow-up due</span>}</div>
+          </div>
+          <button className="close" onClick={()=>setDetail(null)} aria-label="Close">×</button>
         </div>
-        <h3 style={{marginTop:20}}>🕘 Puri History / Timeline</h3>
-        <div className="timeline">{(detail.history||[]).map((h,i)=><div key={i}><b>{h.date}</b> — {h.event}</div>)}</div>
-        <div style={{display:"flex",gap:10,marginTop:22,flexWrap:"wrap"}}><button className="btn" onClick={()=>{setEditing(detail);setDetail(null);}}>✏ Edit Karo</button>{detail.phone&&detail.phone.includes("+")&&<a className="btn2" style={{textDecoration:"none"}} target="_blank" href={`https://wa.me/${detail.phone.replace(/[^0-9]/g,"")}`}>WhatsApp Kholain</a>}<button className="btn2" onClick={()=>remove(detail.id)}>Delete</button><button className="btn2" onClick={()=>setDetail(null)}>Band Karo</button></div>
+        <div className="drawer-body">
+          <div className="section"><h3>Contact</h3><dl className="kv">
+            <dt>Person</dt><dd>{detail.person||"—"}</dd>
+            <dt>Phone</dt><dd className="num">{detail.phone||"—"}</dd>
+            <dt>Location</dt><dd>{[detail.city,detail.country].filter(Boolean).join(", ")||"—"}</dd>
+            <dt>Niche</dt><dd>{detail.niche}</dd>
+            <dt>Source</dt><dd>{detail.source||"—"}</dd>
+            <dt>Website / GMB</dt><dd>{detail.website} / {detail.gmb}</dd>
+          </dl>{detail.gap&&<div className="quote">{detail.gap}</div>}</div>
+
+          <div className="section"><h3>Outreach</h3><dl className="kv">
+            <dt>Sent</dt><dd>{detail.dateSent||"—"} · {detail.channel} · Variant {detail.variant||"—"}</dd>
+            <dt>Message</dt><dd>{detail.messageSent||"—"}</dd>
+            <dt>Reply</dt><dd>{detail.reply==="Yes"?`${detail.replyDate||""} ${detail.replyType?"· "+detail.replyType:""}`:"Koi reply nahi"}</dd>
+          </dl>{detail.replyText&&<div className="quote">“{detail.replyText}”</div>}</div>
+
+          <div className="section"><h3>Demo & deal</h3><dl className="kv">
+            <dt>Demo</dt><dd>{detail.demoStatus} · Personalized: {detail.demoPersonalized}</dd>
+            <dt>Link</dt><dd>{detail.demoLink? <a href={detail.demoLink} target="_blank">{detail.demoLink}</a>:"—"}</dd>
+            <dt>Price</dt><dd>{detail.price||"—"}</dd>
+            <dt>Price clear?</dt><dd>{detail.priceClearWithDemo}</dd>
+            <dt>Closing Q</dt><dd>{detail.closingQuestion||"—"}</dd>
+          </dl></div>
+
+          <div className="section"><h3>Next step</h3><dl className="kv">
+            <dt>Follow-up</dt><dd className={isDue(detail)?"overdue":""}>{detail.nextFollowUp||"—"} <span className="muted">({detail.followUps} done)</span></dd>
+            <dt>Action</dt><dd>{detail.nextAction||"—"}</dd>
+            <dt>Notes</dt><dd>{detail.notes||"—"}</dd>
+          </dl></div>
+
+          {(detail.history||[]).length>0&&<div className="section"><h3>Timeline</h3>
+            <div className="timeline">{detail.history.map((h,i)=><div key={i}><b>{h.date}</b>{h.event}</div>)}</div></div>}
+        </div>
+        <div className="drawer-foot">
+          <button className="btn" onClick={()=>{setEditing(detail);setDetail(null);}}>Edit</button>
+          {detail.phone&&detail.phone.includes("+")&&<a className="btn2" target="_blank" href={`https://wa.me/${detail.phone.replace(/[^0-9]/g,"")}`}>Open WhatsApp</a>}
+          <button className="btn-ghost" style={{marginLeft:"auto"}} onClick={()=>remove(detail.id)}>Delete</button>
+        </div>
       </div></div>
     )}
 
@@ -131,23 +190,26 @@ function LeadForm({lead,onClose,onSave}){
   const upd=(k,v)=>setF(prev=>({...prev,[k]:v}));
   const submit=()=>{ if(!f.business.trim()) return alert("Business name lazmi hai"); const hist=[...(f.history||[])]; if(f.dateSent && !hist.some(h=>h.event.includes("Pitch"))) hist.push({date:f.dateSent,event:"Record updated in dashboard"}); onSave({...f, history:hist}); };
   const F=({label,k,type="input",opts,full})=>(
-    <div className={`field ${full?"full":""}`}><label>{label}</label>
+    <div key={k} className={`field ${full?"full":""}`}><label>{label}</label>
       {type==="select"? <select value={f[k]||""} onChange={e=>upd(k,e.target.value)}>{opts.map(o=><option key={o}>{o}</option>)}</select>
-      : type==="area"? <textarea rows={3} value={f[k]||""} onChange={e=>upd(k,e.target.value)} />
-      : <input type={type==="date"?"date":"text"} value={f[k]||""} onChange={e=>upd(k, type==="number"? Number(e.target.value): e.target.value)} />}
+      : type==="area"? <textarea rows={2} value={f[k]||""} onChange={e=>upd(k,e.target.value)} />
+      : <input type={type==="date"?"date":type==="number"?"number":"text"} value={f[k]??""} onChange={e=>upd(k, type==="number"? Number(e.target.value): e.target.value)} />}
     </div>);
-  return (<div className="modalbg"><div className="modal"><h2>{f.business? "Lead Edit Karo":"New Lead"}</h2>
-    <div className="form">
-      <F label="Business Name *" k="business" full/><F label="Contact Person" k="person"/><F label="WhatsApp / Phone" k="phone"/>
-      <F label="City" k="city"/><F label="Country" k="country" type="select" opts={COUNTRIES}/><F label="Niche" k="niche" type="select" opts={NICHES}/><F label="Source" k="source"/>
-      <F label="Website Status" k="website"/><F label="GMB Status" k="gmb"/><F label="Stage" k="stage" type="select" opts={STAGES}/><F label="Channel" k="channel" type="select" opts={CHANNELS}/>
-      <F label="Gap / Observation" k="gap" type="area" full/>
-      <F label="Date Sent" k="dateSent" type="date"/><F label="Template Variant" k="variant" type="select" opts={["A","B",""]}/><F label="Message Sent" k="messageSent" type="area" full/>
-      <F label="Reply Aya?" k="reply" type="select" opts={["No","Yes"]}/><F label="Reply Date" k="replyDate" type="date"/><F label="Reply Type" k="replyType"/><F label="Lead Ne Kya Kaha (exact)" k="replyText" type="area" full/>
-      <F label="Demo Status" k="demoStatus" type="select" opts={["Not Started","Built","Built — unpublished","Built — not deployed","Live","Sent"]}/><F label="Demo Link" k="demoLink"/><F label="Demo Personalized?" k="demoPersonalized" type="select" opts={["No","Yes"]}/><F label="Price Quoted" k="price"/>
-      <F label="Price Demo Ke Sath Clear?" k="priceClearWithDemo" type="select" opts={["No","Yes","Pending — link ke sath bhejna hai"]}/><F label="Closing Question" k="closingQuestion"/>
-      <F label="Next Follow-up Date" k="nextFollowUp" type="date"/><F label="Follow-ups Count" k="followUps" type="number"/><F label="Next Action" k="nextAction" type="area" full/><F label="Notes" k="notes" type="area" full/>
+  const Sec=(t,children)=>(<div className="section"><h3>{t}</h3><div className="form">{children}</div></div>);
+  return (<div className="modalbg"><div className="modal">
+    <div className="modal-head"><h2>{lead.business? "Edit lead":"New lead"}</h2><button className="close" onClick={onClose} aria-label="Close">×</button></div>
+    <div className="modal-body">
+      {Sec("Business",[F({label:"Business name *",k:"business",full:true}),F({label:"Contact person",k:"person"}),F({label:"WhatsApp / phone",k:"phone"}),
+        F({label:"City",k:"city"}),F({label:"Country",k:"country",type:"select",opts:COUNTRIES}),F({label:"Niche",k:"niche",type:"select",opts:NICHES}),F({label:"Source",k:"source"}),
+        F({label:"Website status",k:"website"}),F({label:"GMB status",k:"gmb"}),F({label:"Gap / observation",k:"gap",type:"area",full:true})])}
+      {Sec("Outreach",[F({label:"Stage",k:"stage",type:"select",opts:STAGES}),F({label:"Channel",k:"channel",type:"select",opts:CHANNELS}),
+        F({label:"Date sent",k:"dateSent",type:"date"}),F({label:"Template variant",k:"variant",type:"select",opts:["A","B",""]}),F({label:"Message sent",k:"messageSent",type:"area",full:true})])}
+      {Sec("Reply",[F({label:"Reply aya?",k:"reply",type:"select",opts:["No","Yes"]}),F({label:"Reply date",k:"replyDate",type:"date"}),F({label:"Reply type",k:"replyType"}),F({label:"Lead ne kya kaha (exact)",k:"replyText",type:"area",full:true})])}
+      {Sec("Demo & deal",[F({label:"Demo status",k:"demoStatus",type:"select",opts:["Not Started","Built","Built — unpublished","Built — not deployed","Live","Sent"]}),F({label:"Demo link",k:"demoLink"}),
+        F({label:"Demo personalized?",k:"demoPersonalized",type:"select",opts:["No","Yes"]}),F({label:"Price quoted",k:"price"}),
+        F({label:"Price demo ke sath clear?",k:"priceClearWithDemo",type:"select",opts:["No","Yes","Pending — link ke sath bhejna hai"]}),F({label:"Closing question",k:"closingQuestion"})])}
+      {Sec("Follow-up",[F({label:"Next follow-up date",k:"nextFollowUp",type:"date"}),F({label:"Follow-ups count",k:"followUps",type:"number"}),F({label:"Next action",k:"nextAction",type:"area",full:true}),F({label:"Notes",k:"notes",type:"area",full:true})])}
     </div>
-    <div style={{display:"flex",gap:10,marginTop:20}}><button className="btn" onClick={submit}>💾 Save Karo</button><button className="btn2" onClick={onClose}>Cancel</button></div>
+    <div className="modal-foot"><button className="btn2" onClick={onClose}>Cancel</button><button className="btn" onClick={submit}>Save lead</button></div>
   </div></div>);
 }
