@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SEED_LEADS, STAGES, COUNTRIES, NICHES, CHANNELS } from "../lib/seed";
+import { CITIES, SOURCES } from "../lib/cities";
 
 const KEY = "jm-lead-dashboard-v1";
 const today = () => new Date().toISOString().slice(0,10);
@@ -23,7 +24,10 @@ const saveTpl=(t)=>{ try{ localStorage.setItem(TPL_KEY,JSON.stringify(t)); }catc
 const fill=(t,l)=>t.replaceAll("{name}",(l.person||"").split(" ")[0]||"there").replaceAll("{business}",l.business||"");
 const download=(content,type,name)=>{ const url=URL.createObjectURL(new Blob([content],{type})); const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000); };
 const OPT_KEY="jm-lead-options-v1";
-const loadOpts=()=>{ try{ const o=JSON.parse(localStorage.getItem(OPT_KEY))||{}; return {countries:o.countries||[],niches:o.niches||[]}; }catch(e){ return {countries:[],niches:[]}; } };
+const loadOpts=()=>{ try{ const o=JSON.parse(localStorage.getItem(OPT_KEY))||{}; return {countries:o.countries||[],niches:o.niches||[],sources:o.sources||[]}; }catch(e){ return {countries:[],niches:[],sources:[]}; } };
+const RECENT_KEY="jm-lead-recent-v1";
+const loadRecent=()=>{ try{ const r=JSON.parse(localStorage.getItem(RECENT_KEY))||{}; return {cities:r.cities||{},sources:r.sources||[]}; }catch(e){ return {cities:{},sources:[]}; } };
+const pushRecent=(arr,v)=>[v,...(arr||[]).filter(x=>x.toLowerCase()!==v.toLowerCase())].slice(0,6);
 const uniq=(a)=>[...new Set(a.filter(Boolean).map(x=>String(x).trim()).filter(Boolean))];
 const digits=(p)=>(p||"").replace(/[^0-9]/g,"");
 const pct=(a,b)=>b?Math.round(a/b*100):0;
@@ -37,16 +41,19 @@ export default function Page(){
   const [loaded,setLoaded]=useState(false);
   const [sendFor,setSendFor]=useState(null); const [replyFor,setReplyFor]=useState(null);
   const [fn,setFn]=useState("All"); const [sort,setSort]=useState("recent");
-  const [opts,setOpts]=useState({countries:[],niches:[]}); const [settings,setSettings]=useState(null);
+  const [opts,setOpts]=useState({countries:[],niches:[],sources:[]}); const [recent,setRecent]=useState({cities:{},sources:[]}); const [settings,setSettings]=useState(null);
 
-  useEffect(()=>{ try{ const raw=localStorage.getItem(KEY); if(raw) setLeads(JSON.parse(raw)); }catch(e){} setOpts(loadOpts()); setLoaded(true); },[]);
+  useEffect(()=>{ try{ const raw=localStorage.getItem(KEY); if(raw) setLeads(JSON.parse(raw)); }catch(e){} setOpts(loadOpts()); setRecent(loadRecent()); setLoaded(true); },[]);
+  useEffect(()=>{ if(loaded) try{ localStorage.setItem(RECENT_KEY, JSON.stringify(recent)); }catch(e){} },[recent,loaded]);
   useEffect(()=>{ if(loaded) localStorage.setItem(KEY, JSON.stringify(leads)); },[leads,loaded]);
   useEffect(()=>{ if(loaded) try{ localStorage.setItem(OPT_KEY, JSON.stringify(opts)); }catch(e){} },[opts,loaded]);
 
   const allCountries = useMemo(()=>uniq([...COUNTRIES,...opts.countries,...leads.map(l=>l.country)]),[opts,leads]);
   const allNiches = useMemo(()=>uniq([...NICHES,...opts.niches,...leads.map(l=>l.niche)]),[opts,leads]);
+  const allSources = useMemo(()=>uniq([...SOURCES,...opts.sources,...leads.map(l=>l.source)]),[opts,leads]);
+  const citiesFor = (country)=>uniq([...(CITIES[country]||[]),...leads.filter(l=>l.country===country).map(l=>l.city)]);
   const addOption=(kind,name)=>{ const v=(name||"").trim(); if(!v) return false;
-    const list=kind==="countries"?allCountries:allNiches;
+    const list=kind==="countries"?allCountries:kind==="niches"?allNiches:allSources;
     if(list.some(x=>x.toLowerCase()===v.toLowerCase())) return false;
     setOpts(o=>({...o,[kind]:[...o[kind],v]})); return true; };
   const removeOption=(kind,name)=>setOpts(o=>({...o,[kind]:o[kind].filter(x=>x!==name)}));
@@ -73,7 +80,10 @@ export default function Page(){
     return 0;
   }),[leads,q,fc,fs,fn,sort,view]);
 
-  const save = (lead)=>{ setLeads(prev=>{ const ex=prev.some(x=>x.id===lead.id); return ex? prev.map(x=>x.id===lead.id?lead:x) : [lead,...prev]; }); setEditing(null); };
+  const save = (lead)=>{
+    setRecent(r=>({ cities: lead.city&&lead.country? {...r.cities,[lead.country]:pushRecent(r.cities[lead.country],lead.city.trim())} : r.cities,
+                    sources: lead.source? pushRecent(r.sources,lead.source.trim()) : r.sources }));
+    setLeads(prev=>{ const ex=prev.some(x=>x.id===lead.id); return ex? prev.map(x=>x.id===lead.id?lead:x) : [lead,...prev]; }); setEditing(null); };
   const remove = (id)=>{ if(confirm("Ye lead delete kar dein?")) setLeads(prev=>prev.filter(x=>x.id!==id)); setDetail(null); };
   const exportCsv = ()=>{
     const cols=["business","person","phone","city","country","niche","stage","channel","dateSent","reply","replyDate","replyText","demoStatus","demoLink","price","nextFollowUp","nextAction","notes"];
@@ -87,7 +97,7 @@ export default function Page(){
   const restore=(file)=>{ const r=new FileReader(); r.onload=()=>{ try{ const d=JSON.parse(r.result); const ls=Array.isArray(d)?d:d.leads;
       if(!Array.isArray(ls)) throw new Error("bad");
       if(!confirm(`Backup me ${ls.length} leads hain. Abhi wala data replace kar dein?`)) return;
-      setLeads(ls); if(d.options) setOpts({countries:d.options.countries||[],niches:d.options.niches||[]}); if(d.templates) saveTpl(d.templates);
+      setLeads(ls); if(d.options) setOpts({countries:d.options.countries||[],niches:d.options.niches||[],sources:d.options.sources||[]}); if(d.templates) saveTpl(d.templates);
       setSettings(null); alert("Backup restore ho gaya ✓"); }catch(e){ alert("Ye file sahi backup nahi hai."); } }; r.readAsText(file); };
   const logSend=(lead,{text,variant,isFollow})=>{
     const d=today();
@@ -148,7 +158,7 @@ export default function Page(){
       <div className="topbar">
         <div><div className="h1">{title}</div><p className="sub">Kis ko kab msg kiya, kis ka reply aya — sab ek jagah.</p></div>
         <div className="actions">
-          <button className="btn2" onClick={()=>setSettings("lists")}>+ Country / Niche</button>
+          <button className="btn2" onClick={()=>setSettings("lists")}>+ Country / Niche / Source</button>
           <button className="btn2" onClick={()=>setSettings("data")}>Backup & export</button>
           <button className="btn" onClick={()=>setEditing(emptyLead())}>+ New lead</button>
         </div>
@@ -263,15 +273,15 @@ export default function Page(){
 
     {sendFor && <SendModal lead={sendFor} sentToday={sentToday} onClose={()=>setSendFor(null)} onSend={logSend} />}
     {replyFor && <ReplyModal lead={replyFor} onClose={()=>setReplyFor(null)} onSave={logReply} />}
-    {editing && <LeadForm lead={editing} leads={leads} countries={allCountries} niches={allNiches} onAddOption={addOption} onClose={()=>setEditing(null)} onSave={save} />}
-    {settings && <SettingsModal tab={settings} setTab={setSettings} leads={leads} opts={opts} countries={allCountries} niches={allNiches} onAdd={addOption} onRemove={removeOption}
+    {editing && <LeadForm lead={editing} leads={leads} countries={allCountries} niches={allNiches} sources={allSources} citiesFor={citiesFor} recent={recent} onAddOption={addOption} onClose={()=>setEditing(null)} onSave={save} />}
+    {settings && <SettingsModal tab={settings} setTab={setSettings} leads={leads} opts={opts} countries={allCountries} niches={allNiches} sources={allSources} onAdd={addOption} onRemove={removeOption}
       onCsv={exportCsv} onBackup={backup} onRestore={restore} onReset={resetSeed} onClose={()=>setSettings(null)} />}
   </div>);
 }
 
-function LeadForm({lead,leads,countries,niches,onAddOption,onClose,onSave}){
+function LeadForm({lead,leads,countries,niches,sources,citiesFor,recent,onAddOption,onClose,onSave}){
   const [f,setF]=useState({...lead});
-  const upd=(k,v)=>setF(prev=>({...prev,[k]:v}));
+  const upd=(k,v)=>setF(prev=>{ const n={...prev,[k]:v}; if(k==="country"&&prev.country!==v) n.city=""; return n; });
   const submit=()=>{ if(!f.business.trim()) return alert("Business name lazmi hai");
     const dg=digits(f.phone); const dup=dg.length>=8 && leads.find(x=>x.id!==f.id && digits(x.phone)===dg);
     if(dup && !confirm(`Ye number pehle se "${dup.business}" ke naam se save hai. Phir bhi save karna hai?`)) return; const hist=[...(f.history||[])]; if(f.dateSent && !hist.some(h=>h.event.includes("Pitch"))) hist.push({date:f.dateSent,event:"Record updated in dashboard"}); onSave({...f, history:hist}); };
@@ -290,7 +300,10 @@ function LeadForm({lead,leads,countries,niches,onAddOption,onClose,onSave}){
     <div className="modal-head"><h2>{lead.business? "Edit lead":"New lead"}</h2><button className="close" onClick={onClose} aria-label="Close">×</button></div>
     <div className="modal-body">
       {Sec("Business",[F({label:"Business name *",k:"business",full:true}),F({label:"Contact person",k:"person"}),F({label:"WhatsApp / phone",k:"phone"}),
-        F({label:"City",k:"city"}),F({label:"Country",k:"country",type:"addable",opts:countries}),F({label:"Niche",k:"niche",type:"addable",opts:niches}),F({label:"Source",k:"source"}),
+        F({label:"Country",k:"country",type:"addable",opts:countries}),
+        <div key="city" className="field"><label>City</label><Combo value={f.city} onChange={v=>upd("city",v)} placeholder={`${f.country} ki city search karo…`}
+          groups={[{label:"Recent",items:(recent.cities[f.country]||[])},{label:`${f.country} cities`,items:citiesFor(f.country)}]} /></div>,F({label:"Niche",k:"niche",type:"addable",opts:niches}),<div key="source" className="field"><label>Source</label><Combo value={f.source} onChange={v=>upd("source",v)} placeholder="Muse, Claude, Facebook…"
+          groups={[{label:"Recent",items:recent.sources}, {label:"Sources",items:sources}]} /></div>,
         F({label:"Website status",k:"website"}),F({label:"GMB status",k:"gmb"}),F({label:"Gap / observation",k:"gap",type:"area",full:true})])}
       {Sec("Outreach",[F({label:"Stage",k:"stage",type:"select",opts:STAGES}),F({label:"Channel",k:"channel",type:"select",opts:CHANNELS}),
         F({label:"Date sent",k:"dateSent",type:"date"}),F({label:"Template variant",k:"variant",type:"select",opts:["A","B",""]}),F({label:"Message sent",k:"messageSent",type:"area",full:true})])}
@@ -358,17 +371,18 @@ function OptionList({title,kind,items,builtIn,leads,field,onAdd,onRemove}){
   return (<div className="section"><h3>{title}</h3>
     <div className="chips">{items.map(x=>{ const n=leads.filter(l=>l[field]===x).length; const custom=!builtIn.includes(x);
       return <span key={x} className="chip">{x}<small>{n}</small>{custom&&n===0&&<button onClick={()=>onRemove(kind,x)} title="Remove" aria-label={`Remove ${x}`}>×</button>}</span>; })}</div>
-    <div className="addrow"><input value={v} onChange={e=>setV(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()} placeholder={kind==="countries"?"e.g. Canada, Qatar…":"e.g. Restaurants, Gyms…"} /><button className="btn" onClick={add}>Add</button></div>
+    <div className="addrow"><input value={v} onChange={e=>setV(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()} placeholder={kind==="countries"?"e.g. Canada, Qatar…":kind==="niches"?"e.g. Restaurants, Gyms…":"e.g. Google Maps, Referral…"} /><button className="btn" onClick={add}>Add</button></div>
   </div>);
 }
 
-function SettingsModal({tab,setTab,leads,countries,niches,onAdd,onRemove,onCsv,onBackup,onRestore,onReset,onClose}){
+function SettingsModal({tab,setTab,leads,countries,niches,sources,onAdd,onRemove,onCsv,onBackup,onRestore,onReset,onClose}){
   return (<div className="modalbg" onClick={onClose}><div className="modal small" onClick={e=>e.stopPropagation()}>
-    <div className="modal-head"><div className="tabs"><button className={tab==="lists"?"on":""} onClick={()=>setTab("lists")}>Countries & niches</button><button className={tab==="data"?"on":""} onClick={()=>setTab("data")}>Backup & export</button></div><button className="close" onClick={onClose} aria-label="Close">×</button></div>
+    <div className="modal-head"><div className="tabs"><button className={tab==="lists"?"on":""} onClick={()=>setTab("lists")}>Countries, niches & sources</button><button className={tab==="data"?"on":""} onClick={()=>setTab("data")}>Backup & export</button></div><button className="close" onClick={onClose} aria-label="Close">×</button></div>
     <div className="modal-body">
       {tab==="lists" ? (<>
         <OptionList title="Countries" kind="countries" field="country" items={countries} builtIn={COUNTRIES} leads={leads} onAdd={onAdd} onRemove={onRemove} />
         <OptionList title="Niches" kind="niches" field="niche" items={niches} builtIn={NICHES} leads={leads} onAdd={onAdd} onRemove={onRemove} />
+        <OptionList title="Sources" kind="sources" field="source" items={sources} builtIn={SOURCES} leads={leads} onAdd={onAdd} onRemove={onRemove} />
         <p className="muted" style={{padding:"0 0 12px"}}>Number = kitni leads us me hain. Apni add ki hui cheez tab hi hat sakti hai jab us me koi lead na ho.</p>
       </>) : (<>
         <div className="section"><h3>Backup</h3><p className="muted" style={{marginBottom:10}}>Data sirf isi browser me save hai. Hafte me ek dafa backup download kar lein — naye phone/laptop par Restore se wapas aa jayega.</p>
@@ -397,5 +411,30 @@ function Reports({leads}){
     {group("niche","Niche")}
     {group("country","Country")}
     {group(l=>l.source||"—","Source")}
+  </div>);
+}
+
+function Combo({value,onChange,groups,placeholder}){
+  const [open,setOpen]=useState(false); const [hi,setHi]=useState(0); const [typed,setTyped]=useState(false);
+  const box=useRef(null);
+  useEffect(()=>{ const h=e=>{ if(box.current&&!box.current.contains(e.target)) setOpen(false); }; document.addEventListener("mousedown",h); return ()=>document.removeEventListener("mousedown",h); },[]);
+  const q=typed?(value||"").trim().toLowerCase():"";
+  const seen=new Set(); const shown=[];
+  groups.forEach(g=>{ const items=g.items.filter(x=>{ const k=x.toLowerCase(); if(seen.has(k)) return false; if(q&&!k.includes(q)) return false; seen.add(k); return true; });
+    if(items.length) shown.push({label:g.label,items:q?items.sort((a,b)=>a.toLowerCase().indexOf(q)-b.toLowerCase().indexOf(q)):items}); });
+  const flat=shown.flatMap(g=>g.items).slice(0,60);
+  const pick=(v)=>{ onChange(v); setOpen(false); setTyped(false); };
+  const key=(e)=>{
+    if(e.key==="ArrowDown"){ e.preventDefault(); setOpen(true); setHi(h=>Math.min(h+1,flat.length-1)); }
+    else if(e.key==="ArrowUp"){ e.preventDefault(); setHi(h=>Math.max(h-1,0)); }
+    else if(e.key==="Enter"&&open&&flat[hi]){ e.preventDefault(); pick(flat[hi]); }
+    else if(e.key==="Escape"||e.key==="Tab") setOpen(false);
+  };
+  let idx=-1;
+  return (<div className="combo" ref={box}>
+    <input value={value||""} placeholder={placeholder} onFocus={()=>{setOpen(true);setHi(0);}} onKeyDown={key}
+      onChange={e=>{ onChange(e.target.value); setTyped(true); setOpen(true); setHi(0); }} autoComplete="off" />
+    {open&&flat.length>0&&<div className="combo-list">{shown.map(g=>(<div key={g.label}><div className="combo-group">{g.label}</div>
+      {g.items.map(x=>{ idx++; if(idx>=60) return null; const i=idx; return <div key={g.label+x} className={`combo-item ${i===hi?"hi":""} ${x===value?"sel":""}`} onMouseEnter={()=>setHi(i)} onMouseDown={e=>{e.preventDefault();pick(x);}}>{x}</div>; })}</div>))}</div>}
   </div>);
 }

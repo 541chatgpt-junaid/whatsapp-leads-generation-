@@ -187,3 +187,13 @@ input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .frow span{color:var(--text2)}
 .fbar{height:10px}
 @media(max-width:860px){.reports{grid-template-columns:1fr}}
+
+/* searchable combo */
+.combo{position:relative}
+.combo input{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface)}
+.combo input:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+.combo-list{position:absolute;left:0;right:0;top:calc(100% + 4px);max-height:260px;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 12px 24px rgba(16,24,40,.12);z-index:5;padding:4px}
+.combo-group{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;padding:8px 8px 4px}
+.combo-item{padding:6px 8px;border-radius:6px;cursor:pointer}
+.combo-item.hi{background:var(--accent-soft);color:var(--accent-ink)}
+.combo-item.sel{font-weight:600}
