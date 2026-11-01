@@ -12,6 +12,15 @@ function heat(l){
   if(["Deal Closed","Delivered"].includes(l.stage)) return "done";
   return "cold";
 }
+const addDays=(d,n)=>{ const x=new Date(d+"T00:00:00"); x.setDate(x.getDate()+n); return x.toISOString().slice(0,10); };
+const waNumber=(phone)=>{ if(!phone||phone.includes("landline")) return ""; const d=phone.replace(/[^0-9]/g,""); return d.length>=8?d:""; };
+const PRE_SENT=["New Lead","Researched","Ready to Send","Hold"];
+const PRE_REPLY=[...PRE_SENT,"Sent","Silent / Close File"];
+const REPLY_TYPES=["Interested","Demo Requested","Price Asked","Question","Interested — later","Declined","Other"];
+const TPL_KEY="jm-lead-templates-v1";
+const loadTpl=()=>{ try{ return JSON.parse(localStorage.getItem(TPL_KEY))||{}; }catch(e){ return {}; } };
+const saveTpl=(t)=>{ try{ localStorage.setItem(TPL_KEY,JSON.stringify(t)); }catch(e){} };
+const fill=(t,l)=>t.replaceAll("{name}",(l.person||"").split(" ")[0]||"there").replaceAll("{business}",l.business||"");
 function isDue(l){ return l.nextFollowUp && l.nextFollowUp <= today() && !["Deal Closed","Delivered","Declined"].includes(l.stage); }
 
 export default function Page(){
@@ -20,6 +29,7 @@ export default function Page(){
   const [q,setQ]=useState(""); const [fc,setFc]=useState("All"); const [fs,setFs]=useState("All");
   const [editing,setEditing]=useState(null); const [detail,setDetail]=useState(null);
   const [loaded,setLoaded]=useState(false);
+  const [sendFor,setSendFor]=useState(null); const [replyFor,setReplyFor]=useState(null);
 
   useEffect(()=>{ try{ const raw=localStorage.getItem(KEY); if(raw) setLeads(JSON.parse(raw)); }catch(e){} setLoaded(true); },[]);
   useEffect(()=>{ if(loaded) localStorage.setItem(KEY, JSON.stringify(leads)); },[leads,loaded]);
@@ -45,6 +55,33 @@ export default function Page(){
     const cols=["business","person","phone","city","country","niche","stage","channel","dateSent","reply","replyDate","replyText","demoStatus","demoLink","price","nextFollowUp","nextAction","notes"];
     const csv=[cols.join(","), ...leads.map(l=>cols.map(c=>`"${String(l[c]??"").replaceAll('"','""')}"`).join(","))].join("\n");
     const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="jm-leads.csv"; a.click();
+  };
+  const patch=(id,fn)=>setLeads(prev=>prev.map(x=>x.id===id?fn(x):x));
+  const logSend=(lead,{text,variant,isFollow})=>{
+    const d=today();
+    patch(lead.id,l=>{ const n=isFollow?(Number(l.followUps)||0)+1:Number(l.followUps)||0; return {...l,
+      channel:"WhatsApp",
+      dateSent: isFollow? l.dateSent : d,
+      variant: isFollow? l.variant : variant,
+      messageSent: isFollow? l.messageSent : text,
+      stage: PRE_SENT.includes(l.stage)? "Sent" : l.stage,
+      followUps:n,
+      nextFollowUp: addDays(d, isFollow?4:3),
+      history:[...(l.history||[]),{date:d,event:isFollow?`Follow-up #${n} sent on WhatsApp: “${text.slice(0,140)}${text.length>140?"…":""}”`:`Pitch sent on WhatsApp (Variant ${variant}): “${text.slice(0,140)}${text.length>140?"…":""}”`}]
+    };});
+    setSendFor(null); setDetail(null);
+  };
+  const logReply=(lead,{text,type,date})=>{
+    patch(lead.id,l=>{
+      let stage=l.stage;
+      if(type==="Declined") stage="Declined";
+      else if(type==="Demo Requested" && !["Demo Sent","Negotiation","Deal Closed","Delivered"].includes(l.stage)) stage="Demo Requested";
+      else if(PRE_REPLY.includes(l.stage)) stage="Replied";
+      return {...l, reply:"Yes", replyDate:date, replyText:text, replyType:type, stage,
+        nextFollowUp: type==="Declined"? "" : (l.nextFollowUp && l.nextFollowUp>date ? l.nextFollowUp : addDays(date,1)),
+        history:[...(l.history||[]),{date,event:`Reply (${type}): “${text.slice(0,160)}${text.length>160?"…":""}”`}] };
+    });
+    setReplyFor(null); setDetail(null);
   };
   const resetSeed = ()=>{ if(confirm("Seed data wapas load kar dein? Aapki changes khatam ho jayengi.")){ setLeads(SEED_LEADS); localStorage.removeItem(KEY);} };
 
@@ -114,16 +151,20 @@ export default function Page(){
         ) : filtered.length===0 ? <div className="empty">Is filter me koi lead nahi mila.</div> : (
           <div style={{overflowX:"auto"}}>
           <table className="table">
-            <thead><tr><th>Lead</th><th>Stage</th><th className="hide-sm">Status</th><th className="hide-md">Sent</th><th className="hide-md">Reply</th><th className="hide-sm">Next follow-up</th><th className="hide-md">Price</th></tr></thead>
+            <thead><tr><th>Lead</th><th>Stage</th><th className="hide-sm">Status</th><th className="hide-md hide-lg">Sent</th><th className="hide-md">Reply</th><th className="hide-sm">Next follow-up</th><th className="hide-md">Price</th><th></th></tr></thead>
             <tbody>{filtered.map(l=>{ const h=heat(l); return (
               <tr key={l.id} onClick={()=>setDetail(l)}>
                 <td className="name"><b>{l.business}</b><small>{[l.person,l.city,l.country].filter(Boolean).join(" · ")}</small></td>
                 <td><span className="pill stage">{l.stage}</span></td>
                 <td className="hide-sm"><span className={`pill ${h}`}><i className="dot"/>{heatLabel[h]}</span></td>
-                <td className="hide-md num muted">{l.dateSent||"—"}</td>
+                <td className="hide-md hide-lg num muted">{l.dateSent||"—"}</td>
                 <td className="hide-md">{l.reply==="Yes"?<span className="pill done">Replied</span>:<span className="muted">—</span>}</td>
                 <td className={`hide-sm num ${isDue(l)?"overdue":"muted"}`}>{l.nextFollowUp||"—"}</td>
-                <td className="hide-md num">{l.price||<span className="muted">—</span>}</td>
+                <td className="hide-md num price" title={l.price}>{l.price||<span className="muted">—</span>}</td>
+                <td className="rowact" onClick={e=>e.stopPropagation()}>
+                  <button className="mini wa" disabled={!waNumber(l.phone)} title={waNumber(l.phone)?"WhatsApp par bhejo":"WhatsApp number nahi hai"} onClick={()=>setSendFor(l)}>Send</button>
+                  <button className="mini" onClick={()=>setReplyFor(l)}>Reply aya</button>
+                </td>
               </tr>); })}
             </tbody>
           </table>
@@ -174,13 +215,16 @@ export default function Page(){
             <div className="timeline">{detail.history.map((h,i)=><div key={i}><b>{h.date}</b>{h.event}</div>)}</div></div>}
         </div>
         <div className="drawer-foot">
-          <button className="btn" onClick={()=>{setEditing(detail);setDetail(null);}}>Edit</button>
-          {detail.phone&&detail.phone.includes("+")&&<a className="btn2" target="_blank" href={`https://wa.me/${detail.phone.replace(/[^0-9]/g,"")}`}>Open WhatsApp</a>}
+          <button className="btn2" onClick={()=>{setEditing(detail);setDetail(null);}}>Edit</button>
+          {waNumber(detail.phone)&&<button className="btn btn-wa" onClick={()=>setSendFor(detail)}>WhatsApp par bhejo</button>}
+          <button className="btn2" onClick={()=>setReplyFor(detail)}>Reply aya</button>
           <button className="btn-ghost" style={{marginLeft:"auto"}} onClick={()=>remove(detail.id)}>Delete</button>
         </div>
       </div></div>
     )}
 
+    {sendFor && <SendModal lead={sendFor} sentToday={sentToday} onClose={()=>setSendFor(null)} onSend={logSend} />}
+    {replyFor && <ReplyModal lead={replyFor} onClose={()=>setReplyFor(null)} onSave={logReply} />}
     {editing && <LeadForm lead={editing} onClose={()=>setEditing(null)} onSave={save} />}
   </div>);
 }
@@ -211,5 +255,53 @@ function LeadForm({lead,onClose,onSave}){
       {Sec("Follow-up",[F({label:"Next follow-up date",k:"nextFollowUp",type:"date"}),F({label:"Follow-ups count",k:"followUps",type:"number"}),F({label:"Next action",k:"nextAction",type:"area",full:true}),F({label:"Notes",k:"notes",type:"area",full:true})])}
     </div>
     <div className="modal-foot"><button className="btn2" onClick={onClose}>Cancel</button><button className="btn" onClick={submit}>Save lead</button></div>
+  </div></div>);
+}
+
+function SendModal({lead,sentToday,onClose,onSend}){
+  const firstSent=!!lead.dateSent;
+  const [isFollow,setIsFollow]=useState(firstSent);
+  const [variant,setVariant]=useState(lead.variant==="B"?"B":"A");
+  const [tpl,setTpl]=useState(()=>loadTpl());
+  const tplKey=isFollow?"followup":variant;
+  const [text,setText]=useState("");
+  useEffect(()=>{ setText(tpl[tplKey]||""); },[tplKey]); // eslint-disable-line
+  const num=waNumber(lead.phone);
+  const capHit=!isFollow && sentToday>=10;
+  const go=()=>{
+    if(!text.trim()) return alert("Message likho");
+    if(capHit && !confirm("Aaj ka 10 nayi chats ka cap poora ho chuka hai. Phir bhi bhejna hai?")) return;
+    const t={...tpl,[tplKey]:text}; saveTpl(t); setTpl(t);
+    const msg=fill(text,lead);
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(msg)}`,"_blank");
+    onSend(lead,{text:msg,variant,isFollow});
+  };
+  return (<div className="modalbg" onClick={onClose}><div className="modal small" onClick={e=>e.stopPropagation()}>
+    <div className="modal-head"><div><h2>WhatsApp par bhejo</h2><p className="muted">{lead.business} · {lead.phone}</p></div><button className="close" onClick={onClose} aria-label="Close">×</button></div>
+    <div className="modal-body"><div className="section"><div className="form">
+      <div className="field"><label>Message type</label>
+        <select value={isFollow?"f":"p"} onChange={e=>setIsFollow(e.target.value==="f")}><option value="p">Pehla pitch</option><option value="f">Follow-up</option></select></div>
+      {!isFollow&&<div className="field"><label>Template variant</label><select value={variant} onChange={e=>setVariant(e.target.value)}><option>A</option><option>B</option></select></div>}
+      <div className="field full"><label>Message</label>
+        <textarea rows={7} value={text} onChange={e=>setText(e.target.value)} placeholder="Hi {name}, I came across {business}…" />
+        <p className="muted" style={{marginTop:6}}>{"{name}"} aur {"{business}"} khud bhar jayenge. Ye text {isFollow?"follow-up":`Variant ${variant}`} template ke taur par yaad rahega.</p></div>
+      {text.trim()&&<div className="field full"><label>Preview</label><div className="quote" style={{whiteSpace:"pre-wrap",marginTop:0}}>{fill(text,lead)}</div></div>}
+      {capHit&&<div className="field full"><div className="warnbox">Aaj ka cap (10 nayi chats) poora ho chuka hai — number ki safety ke liye is lead ko kal bhejna behtar hai.</div></div>}
+    </div></div></div>
+    <div className="modal-foot"><span className="muted" style={{marginRight:"auto"}}>WhatsApp khulega — wahan Send dabana hai. Dashboard khud update ho jayega.</span><button className="btn2" onClick={onClose}>Cancel</button><button className="btn btn-wa" onClick={go}>WhatsApp kholo & save</button></div>
+  </div></div>);
+}
+
+function ReplyModal({lead,onClose,onSave}){
+  const [text,setText]=useState(""); const [type,setType]=useState("Interested"); const [date,setDate]=useState(today());
+  const go=()=>{ if(!text.trim()) return alert("Reply paste karo"); onSave(lead,{text:text.trim(),type,date}); };
+  return (<div className="modalbg" onClick={onClose}><div className="modal small" onClick={e=>e.stopPropagation()}>
+    <div className="modal-head"><div><h2>Reply aya</h2><p className="muted">{lead.business}</p></div><button className="close" onClick={onClose} aria-label="Close">×</button></div>
+    <div className="modal-body"><div className="section"><div className="form">
+      <div className="field full"><label>Lead ne kya kaha (paste karo)</label><textarea rows={4} autoFocus value={text} onChange={e=>setText(e.target.value)} /></div>
+      <div className="field"><label>Reply type</label><select value={type} onChange={e=>setType(e.target.value)}>{REPLY_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+      <div className="field"><label>Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} /></div>
+    </div></div></div>
+    <div className="modal-foot"><button className="btn2" onClick={onClose}>Cancel</button><button className="btn" onClick={go}>Save reply</button></div>
   </div></div>);
 }
