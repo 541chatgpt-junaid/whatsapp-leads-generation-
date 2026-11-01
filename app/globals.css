@@ -156,3 +156,34 @@ input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .table td.price{max-width:170px;overflow:hidden;text-overflow:ellipsis}
 .table td.name{min-width:190px}
 @media(max-width:1250px){.hide-lg{display:none}}
+
+/* stage select in drawer */
+.stagesel{padding:2px 8px;border-radius:99px;border:1px solid transparent;background:var(--accent-soft);color:var(--accent-ink);font-size:12px;font-weight:500;cursor:pointer}
+.stagesel:hover{border-color:var(--accent)}
+
+/* settings */
+.tabs{display:flex;gap:4px;background:var(--gray-soft);padding:3px;border-radius:8px}
+.tabs button{border:0;background:transparent;padding:6px 12px;border-radius:6px;font-weight:500;color:var(--muted)}
+.tabs button.on{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 6px 4px 10px;border:1px solid var(--line);border-radius:99px;font-size:13px;background:var(--surface)}
+.chip small{background:var(--gray-soft);color:var(--muted);border-radius:99px;padding:0 7px;font-size:11px}
+.chip button{border:0;background:transparent;color:var(--faint);font-size:15px;line-height:1;padding:0 4px}
+.chip button:hover{color:var(--red)}
+.addrow{display:flex;gap:8px}
+.addrow input{flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--line)}
+
+/* reports */
+.reports{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:12px;padding:12px}
+.rcard{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--surface)}
+.rcard h3{font-size:13px;font-weight:600;padding:12px 14px;border-bottom:1px solid var(--line)}
+.rtable tbody tr{cursor:default}
+.rtable td,.rtable th{padding:8px 14px}
+.rate{display:flex;align-items:center;gap:8px;min-width:110px}
+.rbar,.fbar{flex:1;height:6px;background:var(--gray-soft);border-radius:99px;overflow:hidden}
+.rbar>i,.fbar>i{display:block;height:100%;background:var(--accent);border-radius:99px}
+.funnel{padding:14px;display:grid;gap:10px}
+.frow{display:grid;grid-template-columns:80px 1fr 36px 40px;align-items:center;gap:10px}
+.frow span{color:var(--text2)}
+.fbar{height:10px}
+@media(max-width:860px){.reports{grid-template-columns:1fr}}
